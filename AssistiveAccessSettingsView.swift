@@ -8,11 +8,13 @@ import SwiftUI
 /// - Status indicators
 /// - Confirmation feedback
 /// - Accessibility features support
+/// - Persistent storage via UserDefaults
 
 struct AssistiveAccessSettingsView: View {
-    @State private var isAssistiveAccessEnabled = false
+    @StateObject private var manager = AssistiveAccessManager()
     @State private var showConfirmation = false
     @State private var statusMessage = ""
+    @State private var pendingState = false
     
     var body: some View {
         VStack(spacing: 20) {
@@ -33,21 +35,24 @@ struct AssistiveAccessSettingsView: View {
             
             // Main Toggle Control
             AccessibleToggleSwitch(
-                isOn: $isAssistiveAccessEnabled,
+                isOn: Binding(
+                    get: { manager.isAssistiveAccessEnabled },
+                    set: { newValue in
+                        pendingState = newValue
+                        showConfirmation = true
+                    }
+                ),
                 label: "Assistive Access",
                 onLabel: "Enabled",
-                offLabel: "Disabled",
-                onToggle: {
-                    handleAssistiveAccessToggle()
-                }
+                offLabel: "Disabled"
             )
             .padding()
             
             // Status Information
             if !statusMessage.isEmpty {
                 HStack(spacing: 12) {
-                    Image(systemName: isAssistiveAccessEnabled ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .foregroundColor(isAssistiveAccessEnabled ? .green : .red)
+                    Image(systemName: manager.isAssistiveAccessEnabled ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundColor(manager.isAssistiveAccessEnabled ? .green : .red)
                     
                     Text(statusMessage)
                         .font(.body)
@@ -60,6 +65,26 @@ struct AssistiveAccessSettingsView: View {
                 .cornerRadius(8)
                 .transition(.scale.combined(with: .opacity))
             }
+            
+            // Current Status Section
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Current Status")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                
+                HStack(spacing: 12) {
+                    Circle()
+                        .fill(manager.isAssistiveAccessEnabled ? Color.green : Color.gray)
+                        .frame(width: 12, height: 12)
+                    
+                    Text(manager.isAssistiveAccessEnabled ? "Assistive Access is Enabled" : "Assistive Access is Disabled")
+                        .font(.body)
+                        .foregroundColor(.primary)
+                }
+            }
+            .padding()
+            .background(Color(.systemGray6))
+            .cornerRadius(8)
             
             // Information Section
             VStack(alignment: .leading, spacing: 12) {
@@ -76,16 +101,37 @@ struct AssistiveAccessSettingsView: View {
             .background(Color(.systemGray6))
             .cornerRadius(8)
             
+            // Reset Button
+            Button(action: {
+                manager.resetToDefault()
+                statusMessage = "Settings reset to default"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    withAnimation {
+                        statusMessage = ""
+                    }
+                }
+            }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.counterclockwise")
+                    Text("Reset to Default")
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color(.systemGray4))
+                .foregroundColor(.black)
+                .cornerRadius(8)
+            }
+            .padding()
+            
             // Confirmation Alert
             if showConfirmation {
                 ConfirmationView(
-                    isEnabled: isAssistiveAccessEnabled,
+                    isEnabled: pendingState,
                     onConfirm: {
                         applyAssistiveAccessSetting()
                         showConfirmation = false
                     },
                     onCancel: {
-                        isAssistiveAccessEnabled.toggle()
                         showConfirmation = false
                     }
                 )
@@ -95,7 +141,7 @@ struct AssistiveAccessSettingsView: View {
             Spacer()
             
             // Footer Info
-            Text("Changes take effect immediately. You may need to restart your app.")
+            Text("Changes are saved automatically. You may need to restart your app.")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .frame(maxWidth: .infinity)
@@ -106,24 +152,19 @@ struct AssistiveAccessSettingsView: View {
         .accessibilityLabel("Assistive Access Settings")
     }
     
-    private func handleAssistiveAccessToggle() {
-        showConfirmation = true
-    }
-    
     private func applyAssistiveAccessSetting() {
-        let action = isAssistiveAccessEnabled ? "enabled" : "disabled"
+        manager.isAssistiveAccessEnabled = pendingState
+        let action = pendingState ? "enabled" : "disabled"
         statusMessage = "Assistive Access has been \(action)"
         
-        // Here you would implement actual system integration
-        // For now, this provides UI feedback
+        // Auto-dismiss status message
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             withAnimation {
                 statusMessage = ""
             }
         }
         
-        // Log the change
-        print("Assistive Access toggled to: \(isAssistiveAccessEnabled)")
+        print("Assistive Access toggled to: \(pendingState)")
     }
 }
 
