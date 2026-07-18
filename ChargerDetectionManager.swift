@@ -1,46 +1,38 @@
 import Foundation
 import UIKit
 
-/// ChargerDetectionManager - Monitors charging state and triggers assistive access changes
+/// ChargerDetectionManager - Monitors device charging state and toggles assistive access
 ///
-/// This manager:
-/// - Detects when a charger is plugged in/removed
-/// - Automatically toggles assistive access based on charging status
-/// - Sends notifications on charging state changes
-/// - Persists user preferences
+/// This manager handles:
+/// - Detecting when charger is plugged in/removed
+/// - Automatically toggling assistive access based on charging status
+/// - Sending notifications to the user
+/// - Persisting charger detection preferences
 
 class ChargerDetectionManager: ObservableObject {
-    @Published var isCharging = false
-    @Published var batteryLevel: Float = 0.0
-    @Published var chargerDetectionEnabled = true
+    @Published var isChargerConnected = false
+    @Published var isAutoToggleEnabled = true
+    @Published var statusMessage = ""
     
-    private var assistiveAccessManager: AssistiveAccessManager
-    private let chargerDetectionKey = "com.app.chargerDetection.enabled"
-    private let autoToggleKey = "com.app.chargerDetection.autoToggle"
+    private let assistiveAccessManager: AssistiveAccessManager
+    private let autoToggleKey = "com.app.charger.autoToggle"
     private let defaultsManager = UserDefaults.standard
-    
-    static let chargerPluggedNotification = NSNotification.Name("ChargerPluggedIn")
-    static let chargerUnpluggedNotification = NSNotification.Name("ChargerUnplugged")
     
     init(assistiveAccessManager: AssistiveAccessManager) {
         self.assistiveAccessManager = assistiveAccessManager
+        self.isAutoToggleEnabled = defaultsManager.bool(
+            forKey: autoToggleKey
+        ) ?? true
         
-        // Load saved preferences
-        self.chargerDetectionEnabled = defaultsManager.bool(
-            forKey: chargerDetectionKey
-        )
-        
-        // Start monitoring battery state
         setupBatteryMonitoring()
-        
-        // Get initial battery state
-        updateBatteryState()
+        checkCurrentChargerStatus()
     }
     
-    /// Setup battery monitoring
+    /// Setup battery state monitoring
     private func setupBatteryMonitoring() {
         UIDevice.current.isBatteryMonitoringEnabled = true
         
+        // Listen for battery state changes
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(batteryStateDidChange),
@@ -48,112 +40,66 @@ class ChargerDetectionManager: ObservableObject {
             object: nil
         )
         
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(batteryLevelDidChange),
-            name: UIDevice.batteryLevelDidChangeNotification,
-            object: nil
-        )
+        print("Battery monitoring enabled")
     }
     
-    /// Update battery state and charging status
+    /// Check current charger status
+    private func checkCurrentChargerStatus() {
+        let state = UIDevice.current.batteryState
+        isChargerConnected = (state == .charging || state == .full)
+        print("Current charger status: \(isChargerConnected ? \"Connected\" : \"Disconnected\")")
+    }
+    
+    /// Handle battery state changes
     @objc private func batteryStateDidChange() {
-        updateBatteryState()
-    }
-    
-    @objc private func batteryLevelDidChange() {
         DispatchQueue.main.async {
-            self.batteryLevel = UIDevice.current.batteryLevel
-        }
-    }
-    
-    /// Check current battery state and handle charging changes
-    private func updateBatteryState() {
-        let device = UIDevice.current
-        let currentBatteryState = device.batteryState
-        let wasCharging = isCharging
-        
-        // Determine if currently charging
-        let nowCharging = (currentBatteryState == .charging || currentBatteryState == .full)
-        
-        DispatchQueue.main.async {
-            self.isCharging = nowCharging
-            self.batteryLevel = device.batteryLevel
+            self.checkCurrentChargerStatus()
             
-            // Handle state change
-            if wasCharging != nowCharging {
-                self.handleChargingStateChange(isNowCharging: nowCharging)
+            if self.isAutoToggleEnabled {
+                self.handleChargerStatusChange()
             }
         }
     }
     
-    /// Handle charging state changes
-    private func handleChargingStateChange(isNowCharging: Bool) {
-        if chargerDetectionEnabled {
-            if isNowCharging {
-                handleChargerPluggedIn()
-            } else {
-                handleChargerUnplugged()
-            }
-        }
-    }
-    
-    /// Handle when charger is plugged in
-    private func handleChargerPluggedIn() {
-        print("⚡ Charger plugged in - Battery level: \(Int(batteryLevel * 100))%")
-        
-        // Post notification
-        NotificationCenter.default.post(name: Self.chargerPluggedNotification, object: nil)
-        
-        // Optionally toggle assistive access
-        if defaultsManager.bool(forKey: autoToggleKey) {
+    /// Handle charger connection/disconnection
+    private func handleChargerStatusChange() {
+        if isChargerConnected {
             assistiveAccessManager.isAssistiveAccessEnabled = true
-            print("✅ Assistive Access enabled on charger plugged in")
-        }
-    }
-    
-    /// Handle when charger is unplugged
-    private func handleChargerUnplugged() {
-        print("🔌 Charger unplugged - Battery level: \(Int(batteryLevel * 100))%")
-        
-        // Post notification
-        NotificationCenter.default.post(name: Self.chargerUnpluggedNotification, object: nil)
-        
-        // Optionally toggle assistive access
-        if defaultsManager.bool(forKey: autoToggleKey) {
+            statusMessage = "Charger detected! Assistive Access enabled."
+            print("Charger plugged in - Assistive Access enabled")
+        } else {
             assistiveAccessManager.isAssistiveAccessEnabled = false
-            print("❌ Assistive Access disabled on charger unplugged")
+            statusMessage = "Charger removed. Assistive Access disabled."
+            print("Charger removed - Assistive Access disabled")
+        }
+        
+        // Auto-dismiss status message
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            withAnimation {
+                self.statusMessage = ""
+            }
         }
     }
     
-    /// Toggle charger detection on/off
-    func toggleChargerDetection(_ enabled: Bool) {
-        chargerDetectionEnabled = enabled
-        defaultsManager.set(enabled, forKey: chargerDetectionKey)
-        print("Charger detection: \(enabled ? "enabled" : "disabled")")
+    /// Toggle auto-toggle feature
+    func toggleAutoToggle() {
+        isAutoToggleEnabled.toggle()
+        defaultsManager.set(isAutoToggleEnabled, forKey: autoToggleKey)
+        print("Auto-toggle set to: \(isAutoToggleEnabled)")
     }
     
-    /// Toggle auto-toggle of assistive access
-    func toggleAutoToggle(_ enabled: Bool) {
-        defaultsManager.set(enabled, forKey: autoToggleKey)
-        print("Auto-toggle assistive access: \(enabled ? "enabled" : "disabled")")
+    /// Enable auto-toggle
+    func enableAutoToggle() {
+        isAutoToggleEnabled = true
+        defaultsManager.set(true, forKey: autoToggleKey)
+        print("Auto-toggle enabled")
     }
     
-    /// Get current battery state as readable string
-    var batteryStateDescription: String {
-        let device = UIDevice.current
-        switch device.batteryState {
-        case .unknown:
-            return "Unknown"
-        case .unplugged:
-            return "Unplugged"
-        case .charging:
-            return "Charging"
-        case .full:
-            return "Full"
-        @unknown default:
-            return "Unknown"
-        }
+    /// Disable auto-toggle
+    func disableAutoToggle() {
+        isAutoToggleEnabled = false
+        defaultsManager.set(false, forKey: autoToggleKey)
+        print("Auto-toggle disabled")
     }
     
     deinit {
